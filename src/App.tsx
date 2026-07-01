@@ -29,8 +29,7 @@ import {
   Filter,
   Award,
   Coins,
-  Flame,
-  AlertTriangle
+  Flame
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -50,7 +49,6 @@ import {
 } from 'firebase/firestore';
 import { CDPhysicalMap } from './components/CDPhysicalMap';
 import CortesDashboard from './components/CortesDashboard';
-import AvariaDashboard from './components/AvariaDashboard';
 
 // --- Error Handling ---
 
@@ -234,17 +232,6 @@ interface CortesItem {
   pedido?: string | null;
 }
 
-interface AvariaItem {
-  date: string;
-  dateObj?: string | null;
-  sku: string;
-  description: string;
-  quantity: number;
-  conversionFactor: string;
-  unitPrice: number;
-  totalPrice: number;
-}
-
 interface SetoresLayoutItem {
   rua: number;
   predio: number;
@@ -283,7 +270,6 @@ interface DashboardMetrics {
   setoresLayout?: SetoresLayoutItem[];
   cortes?: CortesItem[];
   cortesWMS?: CortesItem[];
-  avaria?: AvariaItem[];
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -330,35 +316,10 @@ export default function App() {
   );
 }
 
-type Module = 'ANALISE DE CORTE' | 'MAPA DE OCUPAÇÃO' | 'INVENTARIO CÍCLICO' | 'INVENTARIO GERAL GIROTRADE' | 'AVARIA';
+type Module = 'ANALISE DE CORTE' | 'MAPA DE OCUPAÇÃO' | 'INVENTARIO CÍCLICO' | 'INVENTARIO GERAL GIROTRADE';
 
 const getTheme = (module: Module) => {
   switch (module) {
-    case 'AVARIA':
-      return {
-        primary: 'amber',
-        bg: 'bg-slate-50',
-        realBg: '#f8fafc',
-        sidebarBg: 'bg-white',
-        contentBg: 'bg-amber-600/95 backdrop-blur-xl',
-        border: 'border-amber-700',
-        contentBorder: 'border-amber-900 border-4 shadow-[0_0_20px_rgba(245,158,11,0.4)]',
-        active: 'bg-amber-800 text-white shadow-amber-500/30',
-        hover: 'hover:bg-amber-50',
-        text: 'text-slate-600',
-        contentText: 'text-amber-50',
-        contentTitle: 'text-white',
-        icon: 'text-amber-200',
-        wave1: 'rgba(255,255,255,0.1)',
-        wave2: 'rgba(255,255,255,0.05)',
-        shadow: 'shadow-amber-200/50',
-        contentShadow: 'shadow-2xl shadow-amber-900/20',
-        accent: 'text-amber-400',
-        logo: '#f59e0b',
-        logoTop: '#ffffff',
-        headerTitle: 'text-amber-900',
-        headerText: 'text-amber-700/90'
-      };
     case 'MAPA DE OCUPAÇÃO':
       return {
         primary: 'zinc',
@@ -3046,128 +3007,6 @@ function DashboardApp() {
       metrics.cortesWMS = cortesWmsItems;
     }
 
-    // Process "AVARIA" sheet
-    const avariaSheetName = wb.SheetNames.find(n => {
-      const normalized = n.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return normalized.includes("AVARIA");
-    });
-
-    if (avariaSheetName) {
-      console.log(`[Sync] Encontrada aba de Avarias: ${avariaSheetName}`);
-      const avariaSheet = wb.Sheets[avariaSheetName];
-      const avariaRawData: any[][] = XLSX.utils.sheet_to_json(avariaSheet, { header: 1 });
-      
-      const avariaItems: AvariaItem[] = [];
-
-      // Helper for robust parsing of numeric/currency values (like "R$ 1.250,50" or "R$ -")
-      const parseNumericValue = (val: any): number => {
-        if (val === undefined || val === null) return 0;
-        if (typeof val === 'number') return val;
-        const str = String(val).trim();
-        if (!str || str === '-' || str.includes('R$ -')) return 0;
-        const clean = str
-          .replace(/R\$\s*/gi, '')
-          .replace(/[^\d.,-]/g, '')
-          .trim();
-        if (!clean) return 0;
-        if (clean.includes(',') && clean.includes('.')) {
-          const lastComma = clean.lastIndexOf(',');
-          const lastPeriod = clean.lastIndexOf('.');
-          if (lastComma > lastPeriod) {
-            return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
-          } else {
-            return parseFloat(clean.replace(/,/g, ''));
-          }
-        } else if (clean.includes(',')) {
-          return parseFloat(clean.replace(',', '.'));
-        }
-        const parsed = parseFloat(clean);
-        return isNaN(parsed) ? 0 : parsed;
-      };
-
-      // Header detection:
-      // Column indexes default values:
-      let colDate = 0;
-      let colSku = 2;
-      let colDesc = 3;
-      let colQty = 4;
-      let colUnit = 5;
-      let colPriceUnit = 6;
-      let colPriceTotal = 7;
-
-      // Scan first few rows to confirm column indices dynamically in case layout shifts
-      for (let r = 0; r < Math.min(avariaRawData.length, 5); r++) {
-        const row = avariaRawData[r];
-        if (!row) continue;
-        let foundHeaders = 0;
-        row.forEach((cell, idx) => {
-          const s = String(cell || '').toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          if (s === 'DATA') { colDate = idx; foundHeaders++; }
-          if (s.includes('CODIGO RM') || s.includes('SKU')) { colSku = idx; foundHeaders++; }
-          if (s.includes('PRODUTO') || s.includes('DESCRICAO')) { colDesc = idx; foundHeaders++; }
-          if (s.includes('QUANTIDADE') || s.includes('QTDE')) { colQty = idx; foundHeaders++; }
-          if (s.includes('UNIDADE') || s.includes('EMBALAGEM') || s.includes('FATOR')) { colUnit = idx; foundHeaders++; }
-          if (s.includes('PRECO UNITARIO') || s.includes('VALOR UNITARIO')) { colPriceUnit = idx; foundHeaders++; }
-          if (s.includes('PRECO TOTAL') || s.includes('VALOR TOTAL') || s === 'TOTAL') { colPriceTotal = idx; foundHeaders++; }
-        });
-        if (foundHeaders >= 4) {
-          break;
-        }
-      }
-
-      // Start loop from 1 (assuming row 0 is header)
-      for (let i = 1; i < avariaRawData.length; i++) {
-        const row = avariaRawData[i];
-        if (!row || row.length === 0) continue;
-        
-        // SKU check - must have SKU
-        const skuVal = row[colSku];
-        if (skuVal === undefined || skuVal === null || String(skuVal).trim() === '') continue;
-        const sku = String(skuVal).trim();
-        
-        // Description
-        const description = String(row[colDesc] || '').trim();
-        
-        // Quantity
-        const quantity = Number(row[colQty]) || 0;
-        
-        // Unit/Conversion Factor
-        const conversionFactor = String(row[colUnit] || 'UN').trim();
-        
-        // Unit Price
-        const unitPrice = parseNumericValue(row[colPriceUnit]);
-        
-        // Total Price
-        const totalPrice = parseNumericValue(row[colPriceTotal]);
-
-        // Date
-        const rawDate = row[colDate];
-        let dateObj = parseSheetDate(rawDate);
-        let dateStr = '';
-        
-        if (dateObj) {
-          const d = String(dateObj.getDate()).padStart(2, '0');
-          const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-          const y = dateObj.getFullYear();
-          dateStr = `${d}/${m}/${y}`;
-        }
-
-        avariaItems.push({
-          date: dateStr,
-          dateObj: dateObj ? dateObj.toISOString() : null,
-          sku,
-          description,
-          quantity,
-          conversionFactor,
-          unitPrice,
-          totalPrice
-        });
-      }
-
-      console.log(`[Sync] Total de registros de Avarias mapeados: ${avariaItems.length}`);
-      metrics.avaria = avariaItems;
-    }
-
     const row6 = jsonData[5] || [];
     const totalPositions = Number(row6[8]) || 0;
     metrics.totalPositions = totalPositions;
@@ -3543,8 +3382,7 @@ function DashboardApp() {
     { name: 'INVENTARIO CÍCLICO', icon: LayoutDashboard },
     { name: 'MAPA DE OCUPAÇÃO', icon: Box },
     { name: 'INVENTARIO GERAL GIROTRADE', icon: Box },
-    { name: 'ANALISE DE CORTE', icon: Scissors },
-    { name: 'AVARIA', icon: AlertTriangle }
+    { name: 'ANALISE DE CORTE', icon: Scissors }
   ];
 
   return (
@@ -4713,8 +4551,6 @@ function DashboardApp() {
                 <InventarioGeralView data={data?.inventarioGT} theme={theme} />
               ) : activeModule === 'ANALISE DE CORTE' ? (
                 <CortesDashboard data={data?.cortes} wmsData={data?.cortesWMS} theme={theme} />
-              ) : activeModule === 'AVARIA' ? (
-                <AvariaDashboard data={data?.avaria} theme={theme} />
               ) : (
                 <motion.div 
                   initial={{ opacity: 0, scale: 0.95 }}
