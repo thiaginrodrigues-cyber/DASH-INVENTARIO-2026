@@ -37,7 +37,8 @@ import {
   PieChart,
   Pie,
   Cell,
-  LabelList
+  LabelList,
+  Legend
 } from 'recharts';
 import { cn } from '../lib/utils';
 
@@ -403,37 +404,50 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
   }, [filteredCortes]);
 
   const monthComparisonData = useMemo(() => {
-    if (selectedMonths.length <= 1) return [];
+    if (selectedMonths.length <= 1) return null;
 
-    return selectedMonths
-      .map(monthKey => {
-        const monthItems = filteredCortes.filter(item => {
-          if (!item.dateObject) return false;
-          const year = item.dateObject.getFullYear();
-          const month = String(item.dateObject.getMonth() + 1).padStart(2, '0');
-          return `${year}-${month}` === monthKey;
-        });
-
-        const totalValue = monthItems.reduce((sum, item) => sum + item.value, 0);
-        const totalQty = monthItems.reduce((sum, item) => sum + item.quantity, 0);
-
-        return {
-          monthKey,
-          name: getMonthLabel(monthKey),
-          valor: parseFloat(totalValue.toFixed(2)),
-          quantidade: totalQty
-        };
-      })
+    const monthSeries = selectedMonths
+      .map(monthKey => ({ monthKey, label: getMonthLabel(monthKey) }))
       .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+
+    const monthsMap = new Map<string, Record<number, number>>();
+    let maxDay = 0;
+
+    monthSeries.forEach(({ monthKey }) => {
+      monthsMap.set(monthKey, {});
+    });
+
+    filteredCortes.forEach(item => {
+      if (!item.dateObject) return;
+      const year = item.dateObject.getFullYear();
+      const month = String(item.dateObject.getMonth() + 1).padStart(2, '0');
+      const monthKey = `${year}-${month}`;
+      if (!monthsMap.has(monthKey)) return;
+
+      const day = item.dateObject.getDate();
+      const monthDays = monthsMap.get(monthKey)!;
+      monthDays[day] = (monthDays[day] || 0) + item.value;
+      if (day > maxDay) maxDay = day;
+    });
+
+    const data = Array.from({ length: maxDay }, (_, idx) => {
+      const day = idx + 1;
+      const point: Record<string, any> = { name: String(day).padStart(2, '0') };
+      monthSeries.forEach(({ monthKey }) => {
+        const monthDays = monthsMap.get(monthKey)!;
+        point[monthKey] = monthDays[day] ?? 0;
+      });
+      return point;
+    });
+
+    return { data, monthSeries };
   }, [filteredCortes, selectedMonths]);
 
   const isComparingMonths = selectedMonths.length > 1;
 
   // Gráfico do Período Ativo
   const activeChartData = useMemo(() => {
-    if (isComparingMonths) {
-      return monthComparisonData;
-    }
+    if (isComparingMonths) return [];
 
     if (chartPeriod === 'day') {
       return timeGroupings.daily.map(d => ({
@@ -454,7 +468,7 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
         quantidade: m.totalQty
       }));
     }
-  }, [timeGroupings, chartPeriod, isComparingMonths, monthComparisonData]);
+  }, [timeGroupings, chartPeriod, isComparingMonths]);
 
   // Top 5 motivos (por valor financeiro) para gráfico de donuts/linhas
   const reasonsChartData = useMemo(() => {
@@ -934,32 +948,28 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
               </div>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  {isComparingMonths ? (
-                    <LineChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
+                  {isComparingMonths && monthComparisonData ? (
+                    <LineChart data={monthComparisonData.data} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
                       <XAxis dataKey="name" fontSize={10} stroke="#a1a1aa" tickLine={false} />
                       <YAxis fontSize={10} stroke="#a1a1aa" tickLine={false} tickFormatter={(v) => `R$ ${v}`} />
                       <Tooltip 
-                        formatter={(value: any) => [formatCurrency(Number(value)), "Valor Cortado"]}
+                        formatter={(value: any, name: string) => [formatCurrency(Number(value)), monthComparisonData.monthSeries.find(m => m.monthKey === name)?.label || name]}
                         contentStyle={{ backgroundColor: '#ffffff', borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 11 }}
                       />
-                      <Line
-                        type="monotone"
-                        dataKey="valor"
-                        stroke={theme.logo || '#2563eb'}
-                        strokeWidth={3}
-                        dot={{ r: 4, fill: theme.logo || '#2563eb', stroke: '#fff', strokeWidth: 2 }}
-                        activeDot={{ r: 6, fill: theme.logo || '#2563eb', stroke: '#fff', strokeWidth: 2 }}
-                      />
-                      <LabelList 
-                        dataKey="valor" 
-                        position="top" 
-                        formatter={(val: any) => "R$ " + Math.round(Number(val)).toLocaleString('pt-BR')} 
-                        fontSize={11} 
-                        fill="#1e293b" 
-                        fontWeight="extrabold" 
-                        offset={10} 
-                      />
+                      <Legend verticalAlign="top" height={30} />
+                      {monthComparisonData.monthSeries.map((month, index) => (
+                        <Line
+                          key={month.monthKey}
+                          type="monotone"
+                          dataKey={month.monthKey}
+                          name={month.label}
+                          stroke={['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'][index % 6]}
+                          strokeWidth={3}
+                          dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+                          activeDot={{ r: 6, stroke: ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'][index % 6], strokeWidth: 2 }}
+                        />
+                      ))}
                     </LineChart>
                   ) : activeChartData.length === 1 ? (
                     <BarChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
