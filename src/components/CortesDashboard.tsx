@@ -25,6 +25,8 @@ import {
 import { 
   BarChart, 
   Bar, 
+  LineChart,
+  Line,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -933,7 +935,7 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   {isComparingMonths ? (
-                    <BarChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
+                    <LineChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
                       <XAxis dataKey="name" fontSize={10} stroke="#a1a1aa" tickLine={false} />
                       <YAxis fontSize={10} stroke="#a1a1aa" tickLine={false} tickFormatter={(v) => `R$ ${v}`} />
@@ -941,21 +943,24 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
                         formatter={(value: any) => [formatCurrency(Number(value)), "Valor Cortado"]}
                         contentStyle={{ backgroundColor: '#ffffff', borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 11 }}
                       />
-                      <Bar dataKey="valor" radius={[6, 6, 0, 0]} maxBarSize={60}>
-                        {activeChartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'][index % 6]} />
-                        ))}
-                        <LabelList 
-                          dataKey="valor" 
-                          position="top" 
-                          formatter={(val: any) => "R$ " + Math.round(Number(val)).toLocaleString('pt-BR')} 
-                          fontSize={11} 
-                          fill="#1e293b" 
-                          fontWeight="extrabold" 
-                          offset={10} 
-                        />
-                      </Bar>
-                    </BarChart>
+                      <Line
+                        type="monotone"
+                        dataKey="valor"
+                        stroke={theme.logo || '#2563eb'}
+                        strokeWidth={3}
+                        dot={{ r: 4, fill: theme.logo || '#2563eb', stroke: '#fff', strokeWidth: 2 }}
+                        activeDot={{ r: 6, fill: theme.logo || '#2563eb', stroke: '#fff', strokeWidth: 2 }}
+                      />
+                      <LabelList 
+                        dataKey="valor" 
+                        position="top" 
+                        formatter={(val: any) => "R$ " + Math.round(Number(val)).toLocaleString('pt-BR')} 
+                        fontSize={11} 
+                        fill="#1e293b" 
+                        fontWeight="extrabold" 
+                        offset={10} 
+                      />
+                    </LineChart>
                   ) : activeChartData.length === 1 ? (
                     <BarChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
