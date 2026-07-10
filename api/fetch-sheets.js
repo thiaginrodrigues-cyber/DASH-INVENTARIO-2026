@@ -4,11 +4,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    const sheetUrl =
-      'https://docs.google.com/spreadsheets/d/1tnl6iGFhO87pd0wYPnmOVoCSXJp10xwvSqagHrwTr-s/export?format=xlsx';
+    // Priority: explicit `url` query param -> SHEET_EXPORT_URL env -> SPREADSHEET_ID env -> hardcoded fallback
+    const urlFromQuery = req.query && req.query.url ? String(req.query.url) : null;
+    const sheetExportUrlEnv = process.env.SHEET_EXPORT_URL || null;
+    const spreadsheetIdEnv = process.env.SPREADSHEET_ID || null;
 
-    const queryStr = new URLSearchParams(req.query).toString();
-    const finalUrl = queryStr ? `${sheetUrl}&${queryStr}` : sheetUrl;
+    let sheetUrl = null;
+    if (urlFromQuery) {
+      sheetUrl = urlFromQuery;
+    } else if (sheetExportUrlEnv) {
+      sheetUrl = sheetExportUrlEnv;
+    } else if (spreadsheetIdEnv) {
+      sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetIdEnv}/export?format=xlsx`;
+    } else {
+      sheetUrl = 'https://docs.google.com/spreadsheets/d/1tnl6iGFhO87pd0wYPnmOVoCSXJp10xwvSqagHrwTr-s/export?format=xlsx';
+    }
+
+    const queryStr = new URLSearchParams(Object.assign({}, req.query));
+    // Remove `url` from query params if present to avoid duplicating
+    if (queryStr.has('url')) queryStr.delete('url');
+    const finalUrl = queryStr.toString() ? `${sheetUrl}&${queryStr.toString()}` : sheetUrl;
 
     const response = await fetch(finalUrl, {
       headers: {

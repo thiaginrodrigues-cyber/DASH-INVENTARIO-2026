@@ -117,6 +117,11 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
     return `Sem: ${format(monday)} a ${format(sunday)}`;
   };
 
+  // Helper para determinar a semana do mês (S1, S2, ...)
+  const getWeekOfMonth = (dateObj: Date): number => {
+    return Math.ceil(dateObj.getDate() / 7);
+  };
+
   // 1. Processamento e Normalização Inicial
   const processedData = useMemo(() => {
     return data.map(item => {
@@ -410,11 +415,14 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
       .map(monthKey => ({ monthKey, label: getMonthLabel(monthKey) }))
       .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 
-    const monthsMap = new Map<string, Record<number, number>>();
-    let maxDay = 0;
+    const dailyBuckets = new Map<string, Record<string, number>>();
+    const weeklyBuckets = new Map<string, Record<string, number>>();
+    const monthlyTotals: Array<{ monthKey: string; label: string; totalValue: number }> = [];
 
-    monthSeries.forEach(({ monthKey }) => {
-      monthsMap.set(monthKey, {});
+    monthSeries.forEach(({ monthKey, label }) => {
+      dailyBuckets.set(monthKey, {});
+      weeklyBuckets.set(monthKey, {});
+      monthlyTotals.push({ monthKey, label, totalValue: 0 });
     });
 
     filteredCortes.forEach(item => {
@@ -422,26 +430,63 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
       const year = item.dateObject.getFullYear();
       const month = String(item.dateObject.getMonth() + 1).padStart(2, '0');
       const monthKey = `${year}-${month}`;
-      if (!monthsMap.has(monthKey)) return;
+      if (!dailyBuckets.has(monthKey)) return;
 
-      const day = item.dateObject.getDate();
-      const monthDays = monthsMap.get(monthKey)!;
-      monthDays[day] = (monthDays[day] || 0) + item.value;
-      if (day > maxDay) maxDay = day;
+      const day = String(item.dateObject.getDate()).padStart(2, '0');
+      const week = getWeekOfMonth(item.dateObject);
+
+      const dayBucket = dailyBuckets.get(monthKey)!;
+      dayBucket[day] = (dayBucket[day] || 0) + item.value;
+
+      const weekBucket = weeklyBuckets.get(monthKey)!;
+      weekBucket[`S${week}`] = (weekBucket[`S${week}`] || 0) + item.value;
+
+      const monthTotal = monthlyTotals.find(entry => entry.monthKey === monthKey);
+      if (monthTotal) {
+        monthTotal.totalValue += item.value;
+      }
     });
 
-    const data = Array.from({ length: maxDay }, (_, idx) => {
-      const day = idx + 1;
-      const point: Record<string, any> = { name: String(day).padStart(2, '0') };
+    const maxDay = Math.max(
+      1,
+      ...Array.from(dailyBuckets.values()).flatMap(bucket => Object.keys(bucket).map(day => parseInt(day, 10)))
+    );
+    const maxWeek = Math.max(
+      1,
+      ...Array.from(weeklyBuckets.values()).flatMap(bucket => Object.keys(bucket).map(week => parseInt(week.replace('S', ''), 10)))
+    );
+
+    const dayLabels = Array.from({ length: maxDay }, (_, index) => String(index + 1).padStart(2, '0'));
+    const weekLabels = Array.from({ length: maxWeek }, (_, index) => `S${index + 1}`);
+    const monthLabels = monthSeries.map(item => item.label);
+
+    if (chartPeriod === 'month') {
+      return {
+        mode: 'monthTotals' as const,
+        data: monthlyTotals.map(entry => ({
+          name: entry.label,
+          value: parseFloat(entry.totalValue.toFixed(2)),
+          monthKey: entry.monthKey
+        }))
+      };
+    }
+
+    const xLabels = chartPeriod === 'week' ? weekLabels : dayLabels;
+    const data = xLabels.map(label => {
+      const point: Record<string, any> = { name: label };
       monthSeries.forEach(({ monthKey }) => {
-        const monthDays = monthsMap.get(monthKey)!;
-        point[monthKey] = monthDays[day] ?? 0;
+        const bucket = chartPeriod === 'week' ? weeklyBuckets.get(monthKey)! : dailyBuckets.get(monthKey)!;
+        point[monthKey] = bucket[label] ?? 0;
       });
       return point;
     });
 
-    return { data, monthSeries };
-  }, [filteredCortes, selectedMonths]);
+    return {
+      mode: 'compare' as const,
+      data,
+      monthSeries
+    };
+  }, [filteredCortes, selectedMonths, chartPeriod]);
 
   const isComparingMonths = selectedMonths.length > 1;
 
@@ -495,6 +540,7 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
 
   // Cores de Gráficos Pie (Tons Profissionais e Sofisticados)
   const PIE_COLORS = ['#f43f5e', '#ec4899', '#d946ef', '#a855f7', '#8b5cf6', '#a1a1aa'];
+  const MONTH_COMPARISON_COLORS = ['#2563eb', '#047857', '#f97316', '#7c3aed', '#0f766e', '#475569'];
 
   // Paginação para tabela de registros de Cortes
   const totalPages = Math.ceil(filteredCortes.length / itemsPerPage);
@@ -949,28 +995,56 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   {isComparingMonths && monthComparisonData ? (
-                    <LineChart data={monthComparisonData.data} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
-                      <XAxis dataKey="name" fontSize={10} stroke="#a1a1aa" tickLine={false} />
-                      <YAxis fontSize={10} stroke="#a1a1aa" tickLine={false} tickFormatter={(v) => `R$ ${v}`} />
-                      <Tooltip 
-                        formatter={(value: any, name: string) => [formatCurrency(Number(value)), monthComparisonData.monthSeries.find(m => m.monthKey === name)?.label || name]}
-                        contentStyle={{ backgroundColor: '#ffffff', borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 11 }}
-                      />
-                      <Legend verticalAlign="top" height={30} />
-                      {monthComparisonData.monthSeries.map((month, index) => (
-                        <Line
-                          key={month.monthKey}
-                          type="monotone"
-                          dataKey={month.monthKey}
-                          name={month.label}
-                          stroke={['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'][index % 6]}
-                          strokeWidth={3}
-                          dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
-                          activeDot={{ r: 6, stroke: ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'][index % 6], strokeWidth: 2 }}
+                    monthComparisonData.mode === 'monthTotals' ? (
+                      <BarChart data={monthComparisonData.data} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                        <XAxis dataKey="name" fontSize={10} stroke="#64748b" tickLine={false} axisLine={false} />
+                        <YAxis fontSize={10} stroke="#64748b" tickLine={false} tickFormatter={(v) => `R$ ${v}`} axisLine={false} />
+                        <Tooltip 
+                          formatter={(value: any) => [formatCurrency(Number(value)), 'Valor Mensal']}
+                          contentStyle={{ backgroundColor: '#ffffff', borderRadius: 14, border: '1px solid #e2e8f0', fontSize: 12, boxShadow: '0 12px 24px rgba(15, 23, 42, 0.08)' }}
                         />
-                      ))}
-                    </LineChart>
+                        <Bar dataKey="value" fill={theme.logo || '#2563eb'} radius={[8, 8, 0, 0]} maxBarSize={70} fillOpacity={0.92}>
+                          <LabelList 
+                            dataKey="value" 
+                            position="top" 
+                            formatter={(val: any) => val > 0 ? `R$ ${Math.round(Number(val)).toLocaleString('pt-BR')}` : ''} 
+                            fontSize={11} 
+                            fill="#0f172a" 
+                            fontWeight="extrabold" 
+                            offset={10} 
+                          />
+                        </Bar>
+                      </BarChart>
+                    ) : (
+                      <LineChart data={monthComparisonData.data} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                        <XAxis dataKey="name" fontSize={10} stroke="#a1a1aa" tickLine={false} />
+                        <YAxis fontSize={10} stroke="#a1a1aa" tickLine={false} tickFormatter={(v) => `R$ ${v}`} />
+                        <Tooltip 
+                          formatter={(value: any, name: string) => [formatCurrency(Number(value)), monthComparisonData.monthSeries.find(m => m.monthKey === name)?.label || name]}
+                          contentStyle={{ backgroundColor: '#ffffff', borderRadius: 14, border: '1px solid #e2e8f0', fontSize: 12, boxShadow: '0 10px 25px rgba(15, 23, 42, 0.08)' }}
+                        />
+                        <Legend
+                          verticalAlign="top"
+                          height={36}
+                          wrapperStyle={{ paddingTop: 10, fontSize: 12, color: '#0f172a' }}
+                          iconType="circle"
+                        />
+                        {monthComparisonData.monthSeries.map((month, index) => (
+                          <Line
+                            key={month.monthKey}
+                            type="monotone"
+                            dataKey={month.monthKey}
+                            name={month.label}
+                            stroke={MONTH_COMPARISON_COLORS[index % MONTH_COMPARISON_COLORS.length]}
+                            strokeWidth={3}
+                            dot={{ r: 4, strokeWidth: 2, fill: '#ffffff' }}
+                            activeDot={{ r: 6, stroke: MONTH_COMPARISON_COLORS[index % MONTH_COMPARISON_COLORS.length], strokeWidth: 2, fill: '#ffffff' }}
+                          />
+                        ))}
+                      </LineChart>
+                    )
                   ) : activeChartData.length === 1 ? (
                     <BarChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
