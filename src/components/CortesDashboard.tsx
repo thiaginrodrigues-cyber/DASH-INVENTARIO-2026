@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   Scissors, 
@@ -400,8 +400,39 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
     };
   }, [filteredCortes]);
 
+  const monthComparisonData = useMemo(() => {
+    if (selectedMonths.length <= 1) return [];
+
+    return selectedMonths
+      .map(monthKey => {
+        const monthItems = filteredCortes.filter(item => {
+          if (!item.dateObject) return false;
+          const year = item.dateObject.getFullYear();
+          const month = String(item.dateObject.getMonth() + 1).padStart(2, '0');
+          return `${year}-${month}` === monthKey;
+        });
+
+        const totalValue = monthItems.reduce((sum, item) => sum + item.value, 0);
+        const totalQty = monthItems.reduce((sum, item) => sum + item.quantity, 0);
+
+        return {
+          monthKey,
+          name: getMonthLabel(monthKey),
+          valor: parseFloat(totalValue.toFixed(2)),
+          quantidade: totalQty
+        };
+      })
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }, [filteredCortes, selectedMonths]);
+
+  const isComparingMonths = selectedMonths.length > 1;
+
   // Gráfico do Período Ativo
   const activeChartData = useMemo(() => {
+    if (isComparingMonths) {
+      return monthComparisonData;
+    }
+
     if (chartPeriod === 'day') {
       return timeGroupings.daily.map(d => ({
         name: d.dateStr,
@@ -421,7 +452,7 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
         quantidade: m.totalQty
       }));
     }
-  }, [timeGroupings, chartPeriod]);
+  }, [timeGroupings, chartPeriod, isComparingMonths, monthComparisonData]);
 
   // Top 5 motivos (por valor financeiro) para gráfico de donuts/linhas
   const reasonsChartData = useMemo(() => {
@@ -658,7 +689,7 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
             />
           </div>
 
-          {/* Filtro por Motivo */}
+          {/* Filtro fixo por Motivo: Avaria */}
           <div className="relative">
             <Filter className="absolute left-3.5 top-3.5 w-4 h-4 text-rose-500/60" />
             <select
@@ -875,27 +906,57 @@ export default function CortesDashboard({ data: propsData = [], wmsData = [], th
             <div className={cn("p-6 rounded-2xl shadow-sm lg:col-span-2", theme.contentBg, theme.contentBorder)}>
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider block">Evolução do Impacto por Data</h3>
-                  <span className="text-[10px] text-slate-400 block">Valor monetário totalizado conforme agrupamento temporal</span>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider block">
+                    {isComparingMonths ? 'Comparativo do Impacto por Mês' : 'Evolução do Impacto por Data'}
+                  </h3>
+                  <span className="text-[10px] text-slate-400 block">
+                    {isComparingMonths
+                      ? 'Comparação do impacto financeiro entre os meses selecionados'
+                      : 'Valor monetário totalizado conforme agrupamento temporal'}
+                  </span>
                 </div>
                 <div className="flex gap-1 border border-zinc-200 bg-zinc-50 p-1 rounded-xl">
-                  {(['day', 'week', 'month'] as const).map(p => (
-                    <button 
-                      key={p}
-                      onClick={() => setChartPeriod(p)}
-                      className={cn(
-                        "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
-                        chartPeriod === p ? cn("bg-white shadow-sm font-bold border", theme.accent, theme.border) : "opacity-40 hover:opacity-100 text-zinc-600"
-                      )}
-                    >
-                      {p === 'day' ? 'Dia' : p === 'week' ? 'Semana' : 'Mês'}
-                    </button>
-                  ))}
-                </div>
+                    {(['day', 'week', 'month'] as const).map(p => (
+                      <button 
+                        key={p}
+                        onClick={() => setChartPeriod(p)}
+                        className={cn(
+                          "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                          chartPeriod === p ? cn("bg-white shadow-sm font-bold border", theme.accent, theme.border) : "opacity-40 hover:opacity-100 text-zinc-600"
+                        )}
+                      >
+                        {p === 'day' ? 'Dia' : p === 'week' ? 'Semana' : 'Mês'}
+                      </button>
+                    ))}
+                  </div>
               </div>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  {activeChartData.length === 1 ? (
+                  {isComparingMonths ? (
+                    <BarChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                      <XAxis dataKey="name" fontSize={10} stroke="#a1a1aa" tickLine={false} />
+                      <YAxis fontSize={10} stroke="#a1a1aa" tickLine={false} tickFormatter={(v) => `R$ ${v}`} />
+                      <Tooltip 
+                        formatter={(value: any) => [formatCurrency(Number(value)), "Valor Cortado"]}
+                        contentStyle={{ backgroundColor: '#ffffff', borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 11 }}
+                      />
+                      <Bar dataKey="valor" radius={[6, 6, 0, 0]} maxBarSize={60}>
+                        {activeChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6'][index % 6]} />
+                        ))}
+                        <LabelList 
+                          dataKey="valor" 
+                          position="top" 
+                          formatter={(val: any) => "R$ " + Math.round(Number(val)).toLocaleString('pt-BR')} 
+                          fontSize={11} 
+                          fill="#1e293b" 
+                          fontWeight="extrabold" 
+                          offset={10} 
+                        />
+                      </Bar>
+                    </BarChart>
+                  ) : activeChartData.length === 1 ? (
                     <BarChart data={activeChartData} margin={{ top: 35, right: 30, left: 30, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
                       <XAxis dataKey="name" fontSize={10} stroke="#a1a1aa" tickLine={false} />
